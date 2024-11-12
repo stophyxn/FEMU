@@ -861,7 +861,9 @@ static uint16_t nvme_write_amplification(FemuCtrl *n, NvmeCmd *cmd)
     uint64_t prp1 = le64_to_cpu(cmd->dptr.prp1);
     uint64_t prp2 = le64_to_cpu(cmd->dptr.prp2);
     uint32_t trans_len;
-    uint64_t waf = (n->host_write + n->gc_write) / n->host_write * 100;
+    uint64_t waf;
+    if (n->host_write == 0) waf = 100;
+    else waf = (n->host_write + n->gc_write) / n->host_write * 100;
     trans_len = sizeof(waf);
 
     return dma_read_prp(n, ((uint8_t *)&waf), trans_len, prp1, prp2);
