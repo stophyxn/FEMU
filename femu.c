@@ -558,6 +558,9 @@ static void femu_realize(PCIDevice *pci_dev, Error **errp)
     n->elpes = g_malloc0(sizeof(*n->elpes) * (n->elpe + 1));
     n->aer_reqs = g_malloc0(sizeof(*n->aer_reqs) * (n->aerl + 1));
     n->features.int_vector_config = g_malloc0(sizeof(*n->features.int_vector_config) * (n->nr_io_queues + 1));
+    n->host_write = 0;
+    n->gc_write = 0;
+
 
     nvme_init_pci(n);
     nvme_init_ctrl(n);

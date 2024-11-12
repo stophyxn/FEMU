@@ -688,7 +688,7 @@ static struct line *select_victim_line(struct ssd *ssd, bool force)
 }
 
 /* here ppa identifies the block we want to clean */
-static void clean_one_block(struct ssd *ssd, struct ppa *ppa)
+static int clean_one_block(struct ssd *ssd, struct ppa *ppa)
 {
     struct ssdparams *spp = &ssd->sp;
     struct nand_page *pg_iter = NULL;
@@ -708,6 +708,7 @@ static void clean_one_block(struct ssd *ssd, struct ppa *ppa)
     }
 
     ftl_assert(get_blk(ssd, ppa)->vpc == cnt);
+    return cnt;
 }
 
 static void mark_line_free(struct ssd *ssd, struct ppa *ppa)
@@ -721,13 +722,14 @@ static void mark_line_free(struct ssd *ssd, struct ppa *ppa)
     lm->free_line_cnt++;
 }
 
-static int do_gc(struct ssd *ssd, bool force)
+static int do_gc(struct ssd *ssd, bool force, FemuCtrl *ctrl)
 {
     struct line *victim_line = NULL;
     struct ssdparams *spp = &ssd->sp;
     struct nand_lun *lunp;
     struct ppa ppa;
     int ch, lun;
+    int cnt = 0;
 
     victim_line = select_victim_line(ssd, force);
     if (!victim_line) {
@@ -746,7 +748,7 @@ static int do_gc(struct ssd *ssd, bool force)
             ppa.g.lun = lun;
             ppa.g.pl = 0;
             lunp = get_lun(ssd, &ppa);
-            clean_one_block(ssd, &ppa);
+            cnt += clean_one_block(ssd, &ppa);
             mark_block_free(ssd, &ppa);
 
             if (spp->enable_gc_delay) {
@@ -764,6 +766,7 @@ static int do_gc(struct ssd *ssd, bool force)
     /* update line status */
     mark_line_free(ssd, &ppa);
 
+    ctrl->gc_write += (uint64_t)cnt * spp->secsz * spp->secs_per_pg;
     return 0;
 }
 
@@ -815,13 +818,15 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
     uint64_t curlat = 0, maxlat = 0;
     int r;
 
+    FemuCtrl *ctrl = req->ns->ctrl;
+
     if (end_lpn >= spp->tt_pgs) {
         ftl_err("start_lpn=%"PRIu64",tt_pgs=%d\n", start_lpn, ssd->sp.tt_pgs);
     }
 
     while (should_gc_high(ssd)) {
         /* perform GC here until !should_gc(ssd) */
-        r = do_gc(ssd, true);
+        r = do_gc(ssd, true, ctrl);
         if (r == -1)
             break;
     }
@@ -855,6 +860,7 @@ static uint64_t ssd_write(struct ssd *ssd, NvmeRequest *req)
         maxlat = (curlat > maxlat) ? curlat : maxlat;
     }
 
+    ctrl->host_write += (uint64_t)len * spp->secsz;
     return maxlat;
 }
 
@@ -911,7 +917,7 @@ static void *ftl_thread(void *arg)
 
             /* clean one line if needed (in the background) */
             if (should_gc(ssd)) {
-                do_gc(ssd, false);
+                do_gc(ssd, false, n);
             }
         }
     }
