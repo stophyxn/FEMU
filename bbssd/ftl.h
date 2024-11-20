@@ -154,6 +154,15 @@ struct ssdparams {
     int tt_pls;       /* total # of planes in the SSD */
 
     int tt_luns;      /* total # of LUNs in the SSD */
+
+    //FEMU_CDFTL
+    int gtd_size;
+    int cmt_num_buckets;
+    int cmt_max_size;
+    int ctp_num_buckets;
+    int ctp_max_size;
+    int max_block;
+    int entries_per_pg;
 };
 
 typedef struct line {
@@ -194,6 +203,50 @@ struct nand_cmd {
     int64_t stime; /* Coperd: request arrival time */
 };
 
+typedef struct map_page {
+    struct ppa *dppn;
+};
+
+typedef struct gtd_entry {
+    struct ppa tppn;
+    bool location;
+    bool dirty;
+};
+
+struct cmt_entry {
+    struct data {
+        uint64_t int dlpn;
+        struct ppa dppn;
+        bool dirty;
+    } data;
+    struct cmt_entry *prev;
+    struct cmt_entry *next;
+    struct cmt_entry *lru_prev;
+    struct cmt_entry *lru_next;
+};
+
+struct cmt_hash {
+    uint64_t hash_value;
+    struct cmt_entry *cmt_entries;
+    //struct cmt_hash *hash_next;
+};
+
+struct ctp_entry {
+    uint64_t tvpn;
+    struct map_page *mp;
+    struct ppa tppn;
+    struct ctp_entry *prev;
+    struct ctp_entry *next;
+    struct ctp_entry *lru_prev;
+    struct ctp_entry *lru_next;
+};
+
+struct ctp_hash {
+    uint64_t hash_value;
+    struct ctp_entry *ctp_entries;
+    //struct ctp_hash *hash_next;
+};
+
 struct ssd {
     char *ssdname;
     struct ssdparams sp;
@@ -208,6 +261,22 @@ struct ssd {
     struct rte_ring **to_poller;
     bool *dataplane_started_ptr;
     QemuThread ftl_thread;
+
+    //FEMU_CDFTL
+    struct ctp_hash *ctp;
+    struct cmt_hash *cmt;
+    struct gtd_entry *gtd;
+
+    struct nand_block *blk;
+
+    struct cmt_entry *cmt_lru_head;
+    struct cmt_entry *cmt_lru_tail;
+
+    struct ctp_entry *ctp_lru_head;
+    struct ctp_entry *ctp_lru_tail;
+    
+    int cmt_size;
+    int ctp_size;
 };
 
 void ssd_init(FemuCtrl *n);

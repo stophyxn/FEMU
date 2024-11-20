@@ -14,15 +14,186 @@ static inline bool should_gc_high(struct ssd *ssd)
     return (ssd->lm.free_line_cnt <= ssd->sp.gc_thres_lines_high);
 }
 
+//FEMU CDFTL
+
+static inline int hash_function(uitnt64_t key, int num_buckets) 
+{
+    return key % num_buckets;
+}
+
+int nand_write_tl(nand_sec_status_t ppa, void *data, void *spare){
+
+}
+
+int nand_read_tl(nand_sec_status_t ppa, void *data, void *spare){
+   
+}
+
+int nand_erase_tl(nand_sec_status_t ppa, void *data, void *spare){
+    
+}
+
+
+void push_cmt(struct ssd *ssd, struct cmt_entry *cmt_temp){
+    struct ssdparams *spp = &ssd->sp;
+
+    struct cmt_entry *new_entry = g_malloc0(sizeof(struct cmt_entry));
+    new_entry->lru_next = NULL;
+    
+    new_entry->prev =NULL;
+    new_entry->data.dlpn = cmt_temp->data.dlpn;
+    int tvpn = new_entry->data.dlpn / spp->entries_per_pg;
+    //int cmt_idx = tvpn % 10;          ///////////////////trans8
+    int cmt_idx = hash_function(tvpn, sp->cmt_num_buckets);
+
+    new_entry->data.dppn.ppa = cmt_temp->data.dppn.ppa;
+    new_entry->data.dppn.g.ch = cmt_temp->data.dppn.g.ch;
+    new_entry->data.dppn.g.lun = cmt_temp->data.dppn.g.lun;
+    new_entry->data.dppn.g.pg = cmt_temp->data.dppn.g.pg;
+    new_entry->data.dppn.g.blk = cmt_temp->data.dppn.g.blk;
+    new_entry->data.dppn.g.pl = cmt_temp->data.dppn.g.pl;
+    new_entry->data.dirty = cmt_temp->data.dirty;
+
+    //edit lru
+    if(ssd->cmt_lru_head == NULL && ssd->cmt_lru_tail == NULL){ //empty
+        ssd->cmt_lru_head = new_entry;
+        ssd->cmt_lru_tail = new_entry;
+        new_entry->next = NULL;
+        new_entry->lru_prev = NULL;
+        ssd->cmt[cmt_idx].cmt_entries = new_entry;
+    }
+    else{
+        ssd->cmt_lru_tail->lru_next = new_entry;
+        new_entry->lru_prev  = ssd->cmt_lru_tail;
+        ssd->cmt_lru_tail = new_entry;
+        
+        if(ssd->cmt[cmt_idx].cmt_entries != NULL){
+            new_entry->next = ssd->cmt[cmt_idx].cmt_entries;
+            ssd->cmt[cmt_idx].cmt_entries->prev = new_entry;
+        }
+        else{
+            new_entry->next = NULL;
+            
+        }
+        ssd->cmt[cmt_idx].cmt_entries = new_entry;
+
+    }
+
+    ssd->cmt_size++;
+}
+
+static struct cmt_entry pop_cmt(struct ssd *ssd){
+    struct ssdparams *spp = &ssd->sp;
+    struct cmt_entry new_entry;
+
+    struct cmt_entry *cmt_temp = ssd->cmt_lru_head;
+
+    
+    new_entry.data.dlpn = cmt_temp->data.dlpn;
+    int tvpn = new_entry->data.dlpn / spp->entries_per_pg;
+    //int cmt_idx = tvpn % 10;          ///////////////////trans8
+    int cmt_idx = hash_function(tvpn, sp->cmt_num_buckets);
+    new_entry.data.dppn.ppa = cmt_temp->data.dppn.ppa;
+    new_entry.data.dppn.g.ch = cmt_temp->data.dppn.g.ch;
+    new_entry.data.dppn.g.lun = cmt_temp->data.dppn.g.lun;
+    new_entry.data.dppn.g.pg = cmt_temp->data.dppn.g.pg;
+    new_entry.data.dppn.g.blk = cmt_temp->data.dppn.g.blk;
+    new_entry.data.dppn.g.pl = cmt_temp->data.dppn.g.pl;
+    new_entry.data.dirty = cmt_temp->data.dirty;
+
+    //hash
+    if(ssd->cmt_lru_head->next != NULL){
+        ssd->cmt_lru_head->next->prev = ssd->cmt_lru_head->prev;
+    }
+    if(ssd->cmt_lru_head->prev != NULL){
+        ssd->cmt_lru_head->prev->next = ssd->cmt_lru_head->next;
+    }
+    else if(ssd->cmt_lru_head->prev == NULL){
+        ssd->cmt[cmt_idx].cmt_entries = ssd->cmt_lru_head->next;
+    }
+    
+    //lru
+    ssd->cmt_lru_head = ssd->cmt_lru_head->lru_next;
+    ssd->cmt_lru_head->lru_prev = NULL;
+
+    free(cmt_temp);
+
+    ssd->cmt_size--;
+
+    return new_entry;
+}
+
+static int find_cmt(struct ssd *ssd, uint64_t lpn){
+    //return index what hash[cmt_idx] point to
+    int tvpn = lpn / 8;
+    int cmt_idx = tvpn % 10;
+
+    int ans = 0;
+    struct cmt_entry *cmt_temp = ssd->cmt[cmt_idx].cmt_entries;
+    while(cmt_temp != NULL){
+        if(cmt_temp->data.dlpn == lpn){
+            free(cmt_temp);
+            return ans;
+        }
+        cmt_temp = cmt_temp->next;
+        ans++;
+    }
+
+    free(cmt_temp);
+    return -1;
+}
+
+static void erase_push_cmt(struct ssd *ssd, uint64_t lpn){
+    struct ssdparams *spp = &ssd->sp;
+    int tvpn = lpn / 8;
+    int cmt_idx = tvpn % 10;
+
+    //int ans = 0;
+    struct cmt_entry *cmt_temp = ssd->cmt[cmt_idx].cmt_entries;
+    while(cmt_temp != NULL){
+        if(cmt_temp->data.dlpn == lpn){
+            break;
+        }
+        cmt_temp = cmt_temp->next;
+        //ans++;
+    }
+
+    //hash
+
+    //lru
+    if(ssd->cmt_lru_head == cmt_temp){
+        //remove
+        ssd->cmt_lru_head = ssd->cmt_lru_head->lru_next;
+        ssd->cmt_lru_head->lru_prev = NULL;
+    }
+    else if(ssd->cmt_lru_tail != cmt_temp){
+        //remove
+        cmt_temp->lru_prev->lru_next = cmt_temp->lru_next;
+        cmt_temp->lru_next->lru_prev = cmt_temp->lru_prev;
+    }
+
+    //add
+    if(ssd->cmt_lru_tail != cmt_temp){
+        ssd->cmt_lru_tail->lru_next = cmt_temp;
+        ssd->cmt_lru_tail = cmt_temp;
+        cmt_temp->lru_prev  = ssd->cmt_lru_tail;
+        cmt_temp->lru_next = NULL;
+    }
+}
+
+//
+
 static inline struct ppa get_maptbl_ent(struct ssd *ssd, uint64_t lpn)
 {
-    return ssd->maptbl[lpn];
+    //return ssd->maptbl[lpn];
+
 }
 
 static inline void set_maptbl_ent(struct ssd *ssd, uint64_t lpn, struct ppa *ppa)
 {
-    ftl_assert(lpn < ssd->sp.tt_pgs);
-    ssd->maptbl[lpn] = *ppa;
+    /*ftl_assert(lpn < ssd->sp.tt_pgs);
+    ssd->maptbl[lpn] = *ppa;*/
+
 }
 
 static uint64_t ppa2pgidx(struct ssd *ssd, struct ppa *ppa)
@@ -282,6 +453,14 @@ static void ssd_init_params(struct ssdparams *spp, FemuCtrl *n)
     spp->gc_thres_lines_high = (int)((1 - spp->gc_thres_pcent_high) * spp->tt_lines);
     spp->enable_gc_delay = true;
 
+    //FEMU_CDFTL
+    spp->gtd_size = 3072 //max_Tvpn
+    spp->cmt_num_buckets = 10; //log2(1024)
+    spp->cmt_max_size = 1024;
+    spp->ctp_num_buckets = 5; //log2(32)
+    spp->ctp_max_size = 32;
+    spp->max_block = 16;
+    spp->entries_per_pg = 512;
 
     check_params(spp);
 }
@@ -347,6 +526,37 @@ static void ssd_init_maptbl(struct ssd *ssd)
     ssd->maptbl = g_malloc0(sizeof(struct ppa) * spp->tt_pgs);
     for (int i = 0; i < spp->tt_pgs; i++) {
         ssd->maptbl[i].ppa = UNMAPPED_PPA;
+    }
+
+    //FEMU_CDFTL
+    ssd->gtd = g_malloc0(sizeof(struct gtd_entry) * spp->gtd_size);
+    for (int i = 0; i < spp->gtd_size; i++) {
+        ssd->gtd[i].location = -1;
+        ssd->gtd[i].dirty = 0;
+        ssd->gtd[i].tppn = UNMAPPED_PPA;
+    }
+
+    ssd->cmt = g_malloc0(sizeof(struct cmt_hash) * spp->cmt_num_buckets);
+    for (int i = 0; i < spp->cmt_num_buckets; i++) {
+        ssd->cmt[i].hash_value = -1;
+        ssd->cmt[i].cmt_entries = NULL;
+    }
+    ssd->cmt_size = 0;
+    ssd->cmt_lru_head = NULL;
+    ssd->cmt_lru_tail = NULL;
+    
+    ssd->ctp = g_malloc0(sizeof(struct ctp_hash) * spp->ctp_num_buckets);
+    for (int i = 0; i < spp->ctp_num_buckets; i++) {
+        ssd->ctp[i].hash_value = -1;
+        ssd->ctp[i].ctp_entries = NULL;
+    }
+    ssd->ctp_size = 0;
+    ssd->ctp_lru_head = NULL;
+    ssd->ctp_lru_tail = NULL;
+
+    ssd->blk = g_malloc0(sizeof(struct nand_block) * spp->max_block);
+    for (int i = 0; i < spp->max_block; i++) {
+        ssd_init_nand_blk(&ssd->blk[i], spp);
     }
 }
 
