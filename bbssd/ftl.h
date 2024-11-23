@@ -267,8 +267,6 @@ struct ssd {
     struct cmt_hash *cmt;
     struct gtd_entry *gtd;
 
-    struct nand_block *blk;
-
     struct cmt_entry *cmt_lru_head;
     struct cmt_entry *cmt_lru_tail;
 
@@ -277,6 +275,24 @@ struct ssd {
     
     int cmt_size;
     int ctp_size;
+
+    void *nand;
+
+    struct ppa *data_buf;
+    uint64_t *spare_buf;
+
+    struct ppa *data_buf_gc;
+    uint64_t *spare_buf_gc;
+
+    uint64_t **invalid;
+    uint64_t **invalid_cnt;
+
+    uint64_t *blk_state;
+    uint64_t blk_pos;
+    uint64_t blk_gc;
+    
+    int full_blk;
+    //FEMU end
 };
 
 void ssd_init(FemuCtrl *n);
